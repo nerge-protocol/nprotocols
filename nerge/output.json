@@ -1,0 +1,1 @@
+Error executing transaction '46PPJknN7QtSzmJTWRDHdxw3pvVTiJEG4csw9hpipaw8': MovePackageTooBig { object_size: 108684, max_object_size: 102400 } in command 0

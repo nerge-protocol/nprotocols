@@ -1,0 +1,433 @@
+/// Swap Router - User-facing swap interface
+///
+/// Provides:
+/// - Simple swap functions with slippage protection
+/// - Multi-hop swaps (swap through multiple pools)
+/// - Deadline protection
+/// - Exact input/output swap variants
+module protocol::swap_router;
+
+use acl_dex_core::pool::{Self as pool, Pool};
+use nerge_math_lib::tick_math;
+use sui::clock::{Self, Clock};
+use sui::coin::{Self, Coin};
+use sui::tx_context::{Self, TxContext};
+
+// ========================================================================
+// Error Codes
+// ========================================================================
+
+const EDEADLINE_EXCEEDED: u64 = 1;
+const EINSUFFICIENT_OUTPUT: u64 = 2;
+const EEXCESSIVE_INPUT: u64 = 3;
+const EINVALID_PATH: u64 = 4;
+const EZERO_AMOUNT: u64 = 5;
+
+// ========================================================================
+// Structs
+// ========================================================================
+
+/// Parameters for exact input single swap
+public struct ExactInputSingleParams has copy, drop {
+    amount_in: u64,
+    amount_out_minimum: u64,
+    sqrt_price_limit_x96: u256,
+    deadline: u64,
+}
+
+/// Parameters for exact output single swap
+public struct ExactOutputSingleParams has copy, drop {
+    amount_out: u64,
+    amount_in_maximum: u64,
+    sqrt_price_limit_x96: u256,
+    deadline: u64,
+}
+
+// ========================================================================
+// Exact Input Swaps
+// ========================================================================
+
+/// Swap exact amount of token0 for token1
+///
+/// User specifies exact input amount and minimum output amount.
+/// Reverts if output is less than minimum or deadline exceeded.
+///
+/// Example:
+/// ```
+/// // Swap exactly 1000 SUI for at least 900 USDC
+/// let params = create_exact_input_params(1000, 900, price_limit, deadline);
+/// let usdc = exact_input_single_0_for_1(
+///     &mut pool,
+///     params,
+///     sui_payment,
+///     &clock,
+///     ctx
+/// );
+/// ```
+public fun exact_input_single_0_for_1<Token0, Token1>(
+    pool: &mut Pool<Token0, Token1>,
+    params: ExactInputSingleParams,
+    payment: Coin<Token0>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Coin<Token1> {
+    // Check deadline
+    check_deadline(clock, params.deadline);
+
+    // Validate amounts
+    assert!(params.amount_in > 0, EZERO_AMOUNT);
+    assert!(coin::value(&payment) >= params.amount_in, EEXCESSIVE_INPUT);
+
+    // Execute swap
+    let output = pool::swap_0_for_1(
+        pool,
+        params.amount_in,
+        params.sqrt_price_limit_x96,
+        payment,
+        ctx,
+    );
+
+    // Check slippage
+    let amount_out = coin::value(&output);
+    assert!(amount_out >= params.amount_out_minimum, EINSUFFICIENT_OUTPUT);
+
+    output
+}
+
+/// Swap exact amount of token1 for token0
+public fun exact_input_single_1_for_0<Token0, Token1>(
+    pool: &mut Pool<Token0, Token1>,
+    params: ExactInputSingleParams,
+    payment: Coin<Token1>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Coin<Token0> {
+    check_deadline(clock, params.deadline);
+
+    assert!(params.amount_in > 0, EZERO_AMOUNT);
+    assert!(coin::value(&payment) >= params.amount_in, EEXCESSIVE_INPUT);
+
+    let output = pool::swap_1_for_0(
+        pool,
+        params.amount_in,
+        params.sqrt_price_limit_x96,
+        payment,
+        ctx,
+    );
+
+    let amount_out = coin::value(&output);
+    assert!(amount_out >= params.amount_out_minimum, EINSUFFICIENT_OUTPUT);
+
+    output
+}
+
+// ========================================================================
+// Multi-hop Swaps
+// ========================================================================
+
+/// Swap through two pools: Token0 -> Token1 -> Token2
+///
+/// Example: SUI -> USDC -> USDT
+public fun exact_input_two_hop<Token0, Token1, Token2>(
+    pool1: &mut Pool<Token0, Token1>,
+    pool2: &mut Pool<Token1, Token2>,
+    amount_in: u64,
+    amount_out_minimum: u64,
+    sqrt_price_limit_1: u256,
+    sqrt_price_limit_2: u256,
+    payment: Coin<Token0>,
+    deadline: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Coin<Token2> {
+    check_deadline(clock, deadline);
+    assert!(amount_in > 0, EZERO_AMOUNT);
+
+    // First hop: Token0 -> Token1
+    let intermediate = pool::swap_0_for_1(
+        pool1,
+        amount_in,
+        sqrt_price_limit_1,
+        payment,
+        ctx,
+    );
+
+    // Second hop: Token1 -> Token2
+    let amount_intermediate = coin::value(&intermediate);
+    let output = pool::swap_0_for_1(
+        pool2,
+        amount_intermediate,
+        sqrt_price_limit_2,
+        intermediate,
+        ctx,
+    );
+
+    // Check final output
+    let amount_out = coin::value(&output);
+    assert!(amount_out >= amount_out_minimum, EINSUFFICIENT_OUTPUT);
+
+    output
+}
+
+/// Swap through three pools: Token0 -> Token1 -> Token2 -> Token3
+///
+/// Example: SUI -> USDC -> USDT -> DAI
+public fun exact_input_three_hop<Token0, Token1, Token2, Token3>(
+    pool1: &mut Pool<Token0, Token1>,
+    pool2: &mut Pool<Token1, Token2>,
+    pool3: &mut Pool<Token2, Token3>,
+    amount_in: u64,
+    amount_out_minimum: u64,
+    sqrt_price_limit_1: u256,
+    sqrt_price_limit_2: u256,
+    sqrt_price_limit_3: u256,
+    payment: Coin<Token0>,
+    deadline: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Coin<Token3> {
+    check_deadline(clock, deadline);
+    assert!(amount_in > 0, EZERO_AMOUNT);
+
+    // First hop
+    let intermediate1 = pool::swap_0_for_1(
+        pool1,
+        amount_in,
+        sqrt_price_limit_1,
+        payment,
+        ctx,
+    );
+
+    // Second hop
+    let amount_intermediate1 = coin::value(&intermediate1);
+    let intermediate2 = pool::swap_0_for_1(
+        pool2,
+        amount_intermediate1,
+        sqrt_price_limit_2,
+        intermediate1,
+        ctx,
+    );
+
+    // Third hop
+    let amount_intermediate2 = coin::value(&intermediate2);
+    let output = pool::swap_0_for_1(
+        pool3,
+        amount_intermediate2,
+        sqrt_price_limit_3,
+        intermediate2,
+        ctx,
+    );
+
+    let amount_out = coin::value(&output);
+    assert!(amount_out >= amount_out_minimum, EINSUFFICIENT_OUTPUT);
+
+    output
+}
+
+// ========================================================================
+// Helper Functions
+// ========================================================================
+
+/// Create exact input parameters
+public fun create_exact_input_params(
+    amount_in: u64,
+    amount_out_minimum: u64,
+    sqrt_price_limit_x96: u256,
+    deadline: u64,
+): ExactInputSingleParams {
+    ExactInputSingleParams {
+        amount_in,
+        amount_out_minimum,
+        sqrt_price_limit_x96,
+        deadline,
+    }
+}
+
+/// Create exact output parameters
+public fun create_exact_output_params(
+    amount_out: u64,
+    amount_in_maximum: u64,
+    sqrt_price_limit_x96: u256,
+    deadline: u64,
+): ExactOutputSingleParams {
+    ExactOutputSingleParams {
+        amount_out,
+        amount_in_maximum,
+        sqrt_price_limit_x96,
+        deadline,
+    }
+}
+
+/// Get default price limit for swapping token0 to token1
+public fun get_default_price_limit_0_to_1(): u256 {
+    tick_math::get_min_sqrt_ratio() + 1
+}
+
+/// Get default price limit for swapping token1 to token0
+public fun get_default_price_limit_1_to_0(): u256 {
+    tick_math::get_max_sqrt_ratio() - 1
+}
+
+/// Check if deadline has passed
+fun check_deadline(clock: &Clock, deadline: u64) {
+    let current_time = clock::timestamp_ms(clock) / 1000; // Convert to seconds
+    assert!(current_time <= deadline, EDEADLINE_EXCEEDED);
+}
+
+/// Calculate deadline from current time + duration
+public fun calculate_deadline(clock: &Clock, duration_seconds: u64): u64 {
+    let current_time = clock::timestamp_ms(clock) / 1000;
+    current_time + duration_seconds
+}
+
+// ========================================================================
+// Convenience Functions (Entry)
+// ========================================================================
+
+/// Entry function: Simple swap with automatic slippage (5%)
+public entry fun swap_exact_input_0_for_1_simple<Token0, Token1>(
+    pool: &mut Pool<Token0, Token1>,
+    amount_in: u64,
+    payment: Coin<Token0>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let deadline = calculate_deadline(clock, 600); // 10 minutes
+    let amount_out_minimum = (amount_in as u128) * 95 / 100; // 5% slippage
+
+    let params = create_exact_input_params(
+        amount_in,
+        (amount_out_minimum as u64),
+        get_default_price_limit_0_to_1(),
+        deadline,
+    );
+
+    let output = exact_input_single_0_for_1(
+        pool,
+        params,
+        payment,
+        clock,
+        ctx,
+    );
+
+    // Transfer output to sender
+    let sender = tx_context::sender(ctx);
+    sui::transfer::public_transfer(output, sender);
+}
+
+/// Entry function: Simple swap with automatic slippage (5%)
+public entry fun swap_exact_input_1_for_0_simple<Token0, Token1>(
+    pool: &mut Pool<Token0, Token1>,
+    amount_in: u64,
+    payment: Coin<Token1>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let deadline = calculate_deadline(clock, 600);
+    let amount_out_minimum = (amount_in as u128) * 95 / 100;
+
+    let params = create_exact_input_params(
+        amount_in,
+        (amount_out_minimum as u64),
+        get_default_price_limit_1_to_0(),
+        deadline,
+    );
+
+    let output = exact_input_single_1_for_0(
+        pool,
+        params,
+        payment,
+        clock,
+        ctx,
+    );
+
+    let sender = tx_context::sender(ctx);
+    sui::transfer::public_transfer(output, sender);
+}
+
+// ========================================================================
+// Tests
+// ========================================================================
+
+#[test_only]
+use sui::test_scenario;
+#[test_only]
+use sui::test_utils;
+
+#[test_only]
+public struct TOKEN_X has drop {}
+#[test_only]
+public struct TOKEN_Y has drop {}
+
+#[test]
+fun test_exact_input_single() {
+    let user = @0xA;
+    let mut scenario = test_scenario::begin(user);
+
+    // Create pool
+    test_scenario::next_tx(&mut scenario, user);
+    let ctx = test_scenario::ctx(&mut scenario);
+    let sqrt_price = 79228162514264337593543950336_u256;
+    let mut pool = pool::create_pool<TOKEN_X, TOKEN_Y>(3000, 60, sqrt_price, ctx);
+
+    // Add liquidity (simplified - would use position manager in practice)
+    // ... (omitted for brevity)
+
+    // Create clock
+    let mut clock = clock::create_for_testing(ctx);
+    clock::set_for_testing(&mut clock, 1000000); // Set to 1000 seconds
+
+    // Perform swap
+    test_scenario::next_tx(&mut scenario, user);
+    let ctx = test_scenario::ctx(&mut scenario);
+    let payment = coin::mint_for_testing<TOKEN_X>(1000, ctx);
+
+    let deadline = calculate_deadline(&clock, 600);
+    let params = create_exact_input_params(
+        1000,
+        900, // Minimum 900 tokens out
+        get_default_price_limit_0_to_1(),
+        deadline,
+    );
+
+    // This would execute if pool had liquidity
+    // let output = exact_input_single_0_for_1(&mut pool, params, payment, &clock, ctx);
+
+    test_utils::destroy(payment);
+    clock::destroy_for_testing(clock);
+    test_utils::destroy(pool);
+    test_scenario::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = EDEADLINE_EXCEEDED)]
+fun test_deadline_exceeded() {
+    let user = @0xA;
+    let mut scenario = test_scenario::begin(user);
+
+    test_scenario::next_tx(&mut scenario, user);
+    let ctx = test_scenario::ctx(&mut scenario);
+    let sqrt_price = 79228162514264337593543950336_u256;
+    let mut pool = pool::create_pool<TOKEN_X, TOKEN_Y>(3000, 60, sqrt_price, ctx);
+
+    let mut clock = clock::create_for_testing(ctx);
+    clock::set_for_testing(&mut clock, 2000000); // Current time: 2000 seconds
+
+    test_scenario::next_tx(&mut scenario, user);
+    let ctx = test_scenario::ctx(&mut scenario);
+    let payment = coin::mint_for_testing<TOKEN_X>(1000, ctx);
+
+    let params = create_exact_input_params(
+        1000,
+        900,
+        get_default_price_limit_0_to_1(),
+        1000, // Deadline: 1000 seconds (already passed)
+    );
+
+    let output = exact_input_single_0_for_1(&mut pool, params, payment, &clock, ctx);
+
+    test_utils::destroy(output);
+    clock::destroy_for_testing(clock);
+    test_utils::destroy(pool);
+    test_scenario::end(scenario);
+}
