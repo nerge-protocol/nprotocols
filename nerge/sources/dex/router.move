@@ -235,6 +235,30 @@ entry fun swap_via_batch<X, Y>(
     transfer::public_transfer(_receipt, tx_context::sender(ctx));
 }
 
+public fun create_pool<Token0, Token1>(
+    fee: u32,
+    tick_spacing: u32,
+    sqrt_price_x96: u256,
+    ctx: &mut TxContext,
+): Pool<Token0, Token1> {
+    acl_dex_core::pool::create_pool(fee, tick_spacing, sqrt_price_x96, ctx)
+}
+
+public entry fun create_and_share_pool<Token0, Token1>(
+    fee: u32,
+    tick_spacing: u32,
+    sqrt_price_x96: u256,
+    ctx: &mut TxContext,
+) {
+    let pool = acl_dex_core::pool::create_pool<Token0, Token1>(
+        fee,
+        tick_spacing,
+        sqrt_price_x96,
+        ctx,
+    );
+    transfer::public_transfer(pool, tx_context::sender(ctx));
+}
+
 // ==================== View Functions ====================
 
 /// Get quote for single-hop swap

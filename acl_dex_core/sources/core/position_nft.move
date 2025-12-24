@@ -165,7 +165,7 @@ public fun mint(
     token1_symbol: String,
     recipient: address,
     ctx: &mut TxContext,
-): u64 {
+): PositionNFT {
     let token_id = registry.next_token_id;
     registry.next_token_id = token_id + 1;
 
@@ -191,8 +191,7 @@ public fun mint(
         liquidity,
     });
 
-    transfer::public_transfer(nft, recipient);
-    token_id
+    nft
 }
 
 /// Burn a position NFT
@@ -374,7 +373,7 @@ fun test_mint_position_nft() {
 
     // Mint NFT
     let pool_id = object::id_from_address(@0xBEEF);
-    let token_id = mint(
+    let nft = mint(
         &mut registry,
         pool_id,
         100,
@@ -386,8 +385,10 @@ fun test_mint_position_nft() {
         test_scenario::ctx(&mut scenario),
     );
 
-    assert!(token_id == 1, 0);
+    assert!(token_id(&nft) == 1, 0);
     assert!(registry.next_token_id == 2, 1);
+
+    burn(nft, test_scenario::ctx(&mut scenario));
 
     // Clean up
     let PositionRegistry { id, next_token_id: _ } = registry;

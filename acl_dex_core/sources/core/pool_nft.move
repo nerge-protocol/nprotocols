@@ -247,7 +247,7 @@ public fun mint<Token0, Token1>(
     payment_1: Coin<Token1>,
     recipient: address,
     ctx: &mut TxContext,
-): (u64, u64, u128, u64) {
+): (u64, u64, u128, PositionNFT) {
     // Validate ticks
     assert!(
         signed_math::greater_than_or_equal_i32(tick_lower, tick_math::get_min_tick()),
@@ -299,7 +299,7 @@ public fun mint<Token0, Token1>(
     );
 
     // Mint Position NFT
-    let token_id = position::mint(
+    let nft = position::mint(
         registry,
         object::id(pool),
         tick_lower,
@@ -312,6 +312,7 @@ public fun mint<Token0, Token1>(
     );
 
     // Store position data in pool
+    let token_id = position::token_id(&nft);
     table::add(
         &mut pool.position_data,
         token_id,
@@ -389,7 +390,7 @@ public fun mint<Token0, Token1>(
         liquidity_minted: liquidity,
     });
 
-    (amount0, amount1, liquidity, token_id)
+    (amount0, amount1, liquidity, nft)
 }
 
 // ========================================================================
@@ -1255,7 +1256,7 @@ fun test_mint_position_nft() {
     let payment_0 = coin::mint_for_testing<SUI>(1000000, ctx);
     let payment_1 = coin::mint_for_testing<USDC>(1000000, ctx);
 
-    let (amount0, amount1, liquidity, token_id) = mint(
+    let (amount0, amount1, liquidity, nft) = mint(
         &mut pool,
         &mut registry,
         tick_lower,
@@ -1270,10 +1271,14 @@ fun test_mint_position_nft() {
         ctx,
     );
 
+    let token_id = position::token_id(&nft);
     assert!(liquidity > 0, 0);
     assert!(amount0 > 0, 1);
     assert!(amount1 > 0, 2);
     assert!(token_id == 1, 3);
+
+    // clean up NFT
+    position::burn(nft, ctx);
 
     // Verify position data in pool
     let (t_lower, t_upper, liq, _, _, _, _) = get_position_data(&pool, token_id);

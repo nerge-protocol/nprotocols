@@ -62,7 +62,7 @@ fun mint_position(
     let payment_0 = coin::mint_for_testing<TOKEN_A>(amount, ctx);
     let payment_1 = coin::mint_for_testing<TOKEN_B>(amount, ctx);
 
-    let (_, _, _, token_id) = pool::mint(
+    let (_, _, _, nft) = pool::mint(
         pool,
         registry,
         tick_lower,
@@ -76,6 +76,8 @@ fun mint_position(
         sender,
         ctx,
     );
+    let token_id = position::token_id(&nft);
+    transfer::public_transfer(nft, sender);
 
     token_id
 }
