@@ -642,6 +642,49 @@ fun calculate_total_vault_value<Token0, Token1>(
     (total_0, total_1)
 }
 
+// fun calculate_total_vault_value_<Token0, Token1>(
+//     vault: &AdaptiveVault<Token0, Token1>,
+//     pool: &Pool<Token0, Token1>,
+// ): (u64, u64) {
+//     let mut total_0 = balance::value(&vault.reserve_0);
+//     let mut total_1 = balance::value(&vault.reserve_1);
+
+//     // Add value from each active position
+//     let mut i = 0;
+//     let len = vector::length(&vault.active_positions);
+
+//     while (i < len) {
+//         let token_id = *vector::borrow(&vault.active_positions, i);
+
+//         // Get position data from pool
+//         let (tick_lower, tick_upper, liquidity, _, _, _, _) = pool::get_position_data(
+//             pool,
+//             token_id,
+//         );
+
+//         if (liquidity > 0) {
+//             // Calculate amounts for this position
+//             let sqrt_price = pool::get_sqrt_price(pool);
+//             let sqrt_lower = tick_math::get_sqrt_ratio_at_tick(tick_lower);
+//             let sqrt_upper = tick_math::get_sqrt_ratio_at_tick(tick_upper);
+
+//             let amounts = liquidity_math::get_amounts_for_liquidity(
+//                 sqrt_price,
+//                 sqrt_lower,
+//                 sqrt_upper,
+//                 liquidity,
+//             );
+
+//             total_0 = total_0 + (liquidity_math::get_amount0(&amounts) as u64);
+//             total_1 = total_1 + (liquidity_math::get_amount1(&amounts) as u64);
+//         };
+
+//         i = i + 1;
+//     };
+
+//     (total_0, total_1)
+// }
+
 /// Ensure vault has enough liquidity for withdrawal
 fun ensure_liquidity_for_withdrawal<Token0, Token1>(
     vault: &mut AdaptiveVault<Token0, Token1>,

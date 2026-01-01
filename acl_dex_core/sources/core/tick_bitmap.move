@@ -259,8 +259,6 @@ fun next_initialized_tick_gt(
 /// - tick=-256 → word=-1 (as u16: 65535), bit=0
 /// - tick=-257 → word=-2 (as u16: 65534), bit=255
 public fun position(compressed_tick: u32): (u16, u8) {
-    use nerge_math_lib::signed_math;
-
     // compressed_tick is i32 stored as u32
     let is_negative = signed_math::is_negative_i32(compressed_tick);
 

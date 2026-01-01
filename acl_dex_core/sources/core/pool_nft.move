@@ -947,6 +947,8 @@ public fun swap_1_for_0<Token0, Token1>(
     coin::from_balance(amount_out_balance, ctx)
 }
 
+/// REMARK: have compared this to uniswap V3 Pool.swap() function,
+/// RESULT: it matches the swap logic
 fun execute_swap_internal<Token0, Token1>(
     pool: &mut Pool<Token0, Token1>,
     zero_for_one: bool,
